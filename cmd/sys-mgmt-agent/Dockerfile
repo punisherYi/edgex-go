@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-FROM golang:1.12-alpine AS builder
+FROM golang:1.13-alpine AS builder
 
 ENV GO111MODULE=on
 WORKDIR /go/src/github.com/edgexfoundry/edgex-go
@@ -37,10 +37,13 @@ RUN rm -rf /var/cache/apk/*
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
       copyright='Copyright (c) 2017-2019: Mainflux, Cavium, Dell'
 
+ENV APP_PORT=48090
+#expose system mgmt agent port
+EXPOSE $APP_PORT
+
 # Copy over the SMA executable bits.
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/sys-mgmt-agent/sys-mgmt-agent /
-COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/sys-mgmt-agent/res/docker/configuration.toml /res/docker/configuration.toml
-COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/sys-mgmt-agent/res/docker/configuration.toml /res/configuration.toml
+COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/sys-mgmt-agent/res/configuration.toml /res/configuration.toml
 
 # Copy over the golang "executor" executable.
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/sys-mgmt-executor/sys-mgmt-executor /
@@ -49,7 +52,7 @@ RUN apk --no-cache add py-pip
 RUN pip install docker-compose==1.23.2
 RUN apk --no-cache add curl
 
-ENTRYPOINT ["/sys-mgmt-agent", "--registry","--profile=docker","--confdir=/res"]
+ENTRYPOINT ["/sys-mgmt-agent","-cp=consul.http://edgex-core-consul:8500","--registry","--confdir=/res"]
 
 # Following (commented-out) line is a life-saving DEBUG statement.
 # ENTRYPOINT tail -f /dev/null

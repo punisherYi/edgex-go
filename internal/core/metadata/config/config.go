@@ -15,8 +15,6 @@
 package config
 
 import (
-	"github.com/edgexfoundry/edgex-go/internal/pkg/config"
-
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/interfaces"
 	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/config"
 )
@@ -25,9 +23,9 @@ import (
 type ConfigurationStruct struct {
 	Writable      WritableInfo
 	Clients       map[string]bootstrapConfig.ClientInfo
-	Databases     config.DatabaseInfo
+	Databases     map[string]bootstrapConfig.Database
 	Logging       bootstrapConfig.LoggingInfo
-	Notifications config.NotificationInfo
+	Notifications NotificationInfo
 	Registry      bootstrapConfig.RegistryInfo
 	Service       bootstrapConfig.ServiceInfo
 	SecretStore   bootstrapConfig.SecretStoreInfo
@@ -37,6 +35,16 @@ type ConfigurationStruct struct {
 type WritableInfo struct {
 	LogLevel                        string
 	EnableValueDescriptorManagement bool
+}
+
+// Notification Info provides properties related to the assembly of notification content
+type NotificationInfo struct {
+	Content           string
+	Description       string
+	Label             string
+	PostDeviceChanges bool
+	Sender            string
+	Slug              string
 }
 
 // UpdateFromRaw converts configuration received from the registry to a service-specific configuration struct which is
@@ -90,12 +98,12 @@ func (c *ConfigurationStruct) GetLogLevel() string {
 	return c.Writable.LogLevel
 }
 
-// SetLogLevel updates the log level in the ConfigurationStruct.
-func (c *ConfigurationStruct) SetRegistryInfo(registryInfo bootstrapConfig.RegistryInfo) {
-	c.Registry = registryInfo
+// GetRegistryInfo returns the RegistryInfo from the ConfigurationStruct.
+func (c *ConfigurationStruct) GetRegistryInfo() bootstrapConfig.RegistryInfo {
+	return c.Registry
 }
 
 // GetDatabaseInfo returns a database information map.
-func (c *ConfigurationStruct) GetDatabaseInfo() config.DatabaseInfo {
+func (c *ConfigurationStruct) GetDatabaseInfo() map[string]bootstrapConfig.Database {
 	return c.Databases
 }

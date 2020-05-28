@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-FROM golang:1.12-alpine AS builder
+FROM golang:1.13-alpine AS builder
 
 ENV GO111MODULE=on
 WORKDIR /go/src/github.com/edgexfoundry/edgex-go
@@ -25,13 +25,18 @@ RUN go mod download
 COPY . .
 RUN make cmd/support-logging/support-logging
 
+#Next image - Copy built Go binary into new workspace
 FROM scratch
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
       copyright='Copyright (c) 2018: Cavium'
 
+ENV APP_PORT=48061
+#expose support logging port
+EXPOSE $APP_PORT
+
 COPY --from=builder /bin/bash /bin/bash
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/support-logging/Attribution.txt /
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/support-logging/support-logging /
-COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/support-logging/res/docker/configuration.toml /res/docker/configuration.toml
-ENTRYPOINT ["/support-logging","--registry","--profile=docker","--confdir=/res"]
+COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/support-logging/res/configuration.toml /res/configuration.toml
+ENTRYPOINT ["/support-logging","-cp=consul.http://edgex-core-consul:8500","--registry","--confdir=/res"]

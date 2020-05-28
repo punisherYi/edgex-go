@@ -25,16 +25,22 @@ type readingTransform interface {
 	ReadingToDBRef(a Reading) (dbRef mgo.DBRef, err error)
 }
 
+// Reading
+//
+// Deprecated: Mongo functionality is deprecated as of the Geneva release.
 type Reading struct {
-	Created  int64         `bson:"created"`
-	Modified int64         `bson:"modified"`
-	Origin   int64         `bson:"origin"`
-	Id       bson.ObjectId `bson:"_id,omitempty"`
-	Uuid     string        `bson:"uuid"`
-	Pushed   int64         `bson:"pushed"` // When the data was pushed out of EdgeX (0 - not pushed yet)
-	Device   string        `bson:"device"`
-	Name     string        `bson:"name"`
-	Value    string        `bson:"value"` // Device sensor data value
+	Created       int64         `bson:"created"`
+	Modified      int64         `bson:"modified"`
+	Origin        int64         `bson:"origin"`
+	Id            bson.ObjectId `bson:"_id,omitempty"`
+	Uuid          string        `bson:"uuid"`
+	Pushed        int64         `bson:"pushed"` // When the data was pushed out of EdgeX (0 - not pushed yet)
+	Device        string        `bson:"device"`
+	Name          string        `bson:"name"`
+	Value         string        `bson:"value"` // Device sensor data value
+	ValueType     string        `bson:"valueType"`
+	MediaType     string        `bson:"mediaType"`
+	FloatEncoding string        `bson:"floatEncoding"`
 }
 
 func (r *Reading) ToContract() (c contract.Reading) {
@@ -52,6 +58,9 @@ func (r *Reading) ToContract() (c contract.Reading) {
 	c.Device = r.Device
 	c.Name = r.Name
 	c.Value = r.Value
+	c.ValueType = r.ValueType
+	c.MediaType = r.MediaType
+	c.FloatEncoding = r.FloatEncoding
 
 	return c
 }
@@ -69,6 +78,9 @@ func (r *Reading) FromContract(from contract.Reading) (id string, err error) {
 	r.Device = from.Device
 	r.Name = from.Name
 	r.Value = from.Value
+	r.ValueType = from.ValueType
+	r.MediaType = from.MediaType
+	r.FloatEncoding = from.FloatEncoding
 
 	id = toContractId(r.Id, r.Uuid)
 	return

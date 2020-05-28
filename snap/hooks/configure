@@ -7,13 +7,11 @@ ALL_SERVICES=""
 # base services
 ALL_SERVICES="$ALL_SERVICES consul"
 ALL_SERVICES="$ALL_SERVICES mongod"
-ALL_SERVICES="$ALL_SERVICES mongo-worker"
 ALL_SERVICES="$ALL_SERVICES redis"
 
 # core services
 ALL_SERVICES="$ALL_SERVICES core-data"
 ALL_SERVICES="$ALL_SERVICES core-metadata"
-ALL_SERVICES="$ALL_SERVICES core-config-seed"
 ALL_SERVICES="$ALL_SERVICES core-command"
 
 # support services
@@ -25,17 +23,21 @@ ALL_SERVICES="$ALL_SERVICES support-rulesengine"
 # app-services
 ALL_SERVICES="$ALL_SERVICES app-service-configurable"
 
-# export services
-ALL_SERVICES="$ALL_SERVICES export-distro"
-ALL_SERVICES="$ALL_SERVICES export-client"
-
 # device services
-ALL_SERVICES="$ALL_SERVICES device-random"
 ALL_SERVICES="$ALL_SERVICES device-virtual"
 
 # security services
 ALL_SERVICES="$ALL_SERVICES security-secret-store"
 ALL_SERVICES="$ALL_SERVICES security-proxy"
+
+# sys mgmt services
+ALL_SERVICES="$ALL_SERVICES sys-mgmt-agent"
+
+# kuiper
+ALL_SERVICES="$ALL_SERVICES kuiper"
+
+# services that use the database
+DB_SERVICES=(core-command core-data core-metadata support-notifications support-scheduler)
 
 # handle_svc will either turn a service off or on and set the associated
 # config item
@@ -59,6 +61,28 @@ handle_svc () {
     esac
 }
 
+restart_db_services () {
+    # since the configuration files have been modified, those
+    # changes need to be progpogated into relevant services, so
+    # restart the services with updated configuration if they were
+    # already running
+    for svc in ${DB_SERVICES[*]}; do
+        status=`snapctl services "$SNAP_NAME.$svc" | grep -o "^active"`
+
+        if [ "$status" = "active" ]; then
+            snapctl restart "$SNAP_NAME.$svc"
+        fi
+    done
+}
+
+update_consul_db_type () {
+    curl -s --request PUT --data "$2" \
+        http://localhost:8500/v1/kv/edgex/core/1.0/edgex-"$1"/Databases/Primary/Type
+
+    curl -s --request PUT --data "$3" \
+        http://localhost:8500/v1/kv/edgex/core/1.0/edgex-"$1"/Databases/Primary/Port
+}
+
 for key in $ALL_SERVICES; do
     # get the config key for the service
     status=$(snapctl get "$key")
@@ -74,7 +98,23 @@ for key in $ALL_SERVICES; do
             # handle the service too
             handle_svc "$key" "$status"
             ;;
-        mongo-worker|security-proxy-setup|security-secretstore-setup)
+        kuiper)
+            # if we are turning kuiper on, make sure
+            # app-service-configurable is on too
+            if [ "$status" = "on" ]; then
+                handle_svc "app-service-configurable" "on"
+                handle_svc "support-rulesengine" "off"
+	    elif [ "$status" = "off" ]; then
+		# only disable if support-rulesengine is disabled too
+                status=$(snapctl get "support-rulesengine")
+                if [ "$status" = "off" ]; then
+                    handle_svc "app-service-configurable" "off"
+		fi
+	    fi
+            # handle the service too
+            handle_svc "$key" "$status"
+            ;;
+        security-proxy-setup|security-secretstore-setup)
             # it doesn't make any sense to disable the *-worker daemons since 
             # they are just oneshot daemons that run after other daemons, so
             # just ignore this request
@@ -115,11 +155,20 @@ for key in $ALL_SERVICES; do
             handle_svc "security-secretstore-setup" "$status"
             ;;
         support-rulesengine)
-            # if we are turning rulesengine on, make sure 
+            # if we are turning rulesengine on, make sure
             # app-service-configurable is on too
             if [ "$status" = "on" ]; then
                 handle_svc "app-service-configurable" "on"
-            fi
+                handle_svc "kuiper" "off"
+	    elif [ "$status" = "off" ]; then
+		# only disable if kuiper is disabled too
+                status=$(snapctl get "kuiper")
+                if [ "$status" = "off" ]; then
+                    handle_svc "app-service-configurable" "off"
+		fi
+	    fi
+            # handle the service too
+            handle_svc "$key" "$status"
             ;;
         *)
             # default case for all other services just enable/disable the service using
@@ -133,90 +182,103 @@ done
 # handle usage of database provider
 dbProvider=$(snapctl get dbtype)
 PREV_DB_PROVIDER_FILE="$SNAP_DATA/prevdbtype"
-if [ -f "$PREV_DB_PROVIDER_FILE" ]; then
-    echo "" > "$PREV_DB_PROVIDER_FILE"
-fi
+
 case "$dbProvider" in 
     "")
         # not set, don't do anything 
         ;;
     "redis")
-        # dbtype is set to redis, see what the previous value of dbtype was
         prevDBtype=$(cat "$PREV_DB_PROVIDER_FILE")
         if [ "$prevDBtype" != "redis" ]; then
-            # change from previous database provider to redis
-            # first change the configuration.toml files for the following
-            # services:
+            # change provider to redis:
+            #
+            # first check for service config in consul, if found
+            # update directly, otherwise update configuration.toml
+            # (this should practically only ever happen for the
+            # two support-* services, as they're disabled by
+            # default in the snap).
+            #
+            # * core-command
             # * core-data
             # * core-metadata
-            # * export-client
             # * support-notifications
             # * support-scheduler
-            for svc in core-data core-metadata export-client support-notifications support-scheduler; do
-                configFile=$SNAP_DATA/config/$svc/res/configuration.toml
-                toml2json --preserve-key-order "$configFile" | \
-                    jq -r '.Databases.Primary.Type = "redisdb" | .Databases.Primary.Port = 6379' | \
-                    json2toml --preserve-key-order > "$configFile.tmp"
-                mv "$configFile.tmp" "$configFile"
+            for svc in ${DB_SERVICES[*]}; do
+                updated="false"
+
+                exists=`curl -s http://localhost:8500/v1/kv/edgex/core/1.0/edgex-$svc/Databases/Primary/Type?raw`
+                if [ "$exists" = "mongodb" ]; then
+                    update_consul_db_type "$svc" "redisdb" "6379"
+                    updated="true"
+		fi
+
+                # if consul wasn't updated, then the service has never been started
+                # so just modify the service's local configuration.toml file
+                if [ "$updated" = "false" ]; then
+                    configFile=$SNAP_DATA/config/$svc/res/configuration.toml
+                    toml2json --preserve-key-order "$configFile" | \
+                        jq -r '.Databases.Primary.Type = "redisdb" | .Databases.Primary.Port = 6379' | \
+                        json2toml --preserve-key-order > "$configFile.tmp"
+                    mv "$configFile.tmp" "$configFile"
+                fi
             done
 
-            # we also need to ensure that the support-logging is set to 
-            # use file based logging persistence
-            configFile=$SNAP_DATA/config/support-logging/res/configuration.toml
-            toml2json --preserve-key-order "$configFile" | \
-                jq -r '.Writable.Persistence = "file"' | \
-                json2toml --preserve-key-order > "$configFile.tmp"
-            mv "$configFile.tmp" "$configFile"
-
-            # turn mongod and mongo-worker off
+            # turn mongod and edgex-mongo off
+            handle_svc "edgex-mongo" "off"
             handle_svc "mongod" "off"
-            handle_svc "mongo-worker" "off"
 
             # turn redis on
             handle_svc "redis" "on"
 
-            # since the configuration files have been modified, those 
-            # changes need to be progpogated into relevant services, so 
-            # restart the services with updated configuration if they were 
-            # already running
-            # note support-logging is here too due to the file Persistence
-            "$SNAP/bin/push-config.sh" core-data core-metadata export-client support-notifications support-scheduler support-logging
+            restart_db_services
         fi
         # save the database provider as redis for next invocation
         echo "redis" > "$PREV_DB_PROVIDER_FILE"
         ;;
     "mongodb")
-        # dbtype is set to mongodb, see what the previous value of dbtype was
         prevDBtype=$(cat "$PREV_DB_PROVIDER_FILE")
         if [ "$prevDBtype" != "mongodb" ]; then
-            # change from previous database provider to mongodb
-            # first change the configuration.toml files for the following
-            # services:
+            # change provider to mongo:
+            #
+            # first check for service config in consul, if found
+            # update directly, otherwise update configuration.toml
+            # (this should practically only ever happen for the
+            # two support-* services, as they're disabled by
+            # default in the snap).
+            #
+            # * core-command
             # * core-data
             # * core-metadata
-            # * export-client
             # * support-notifications
             # * support-scheduler
-            for svc in core-data core-metadata export-client support-notifications support-scheduler; do
-                configFile=$SNAP_DATA/config/$svc/res/configuration.toml
-                toml2json --preserve-key-order "$configFile" | \
-                    jq -r '.Databases.Primary.Type = "mongodb" | .Databases.Primary.Port = 27017' | \
-                    json2toml --preserve-key-order > "$configFile.tmp"
-                mv "$configFile.tmp" "$configFile"
+            for svc in ${DB_SERVICES[*]}; do
+                updated="false"
+
+                exists=`curl -s http://localhost:8500/v1/kv/edgex/core/1.0/edgex-$svc/Databases/Primary/Type?raw`
+                if [ "$exists" = "redisdb" ]; then
+                    update_consul_db_type "$svc" "mongodb" "27017"
+                    updated="true"
+                fi
+
+                # if consul wasn't updated, then the support-* service has never been started
+                # so just modify the service's local configuration.toml file
+                if [ "$updated" = "false" ]; then
+                    configFile=$SNAP_DATA/config/$svc/res/configuration.toml
+                    toml2json --preserve-key-order "$configFile" | \
+                        jq -r '.Databases.Primary.Type = "mongodb" | .Databases.Primary.Port = 27017' | \
+                        json2toml --preserve-key-order > "$configFile.tmp"
+                    mv "$configFile.tmp" "$configFile"
+                fi
             done
-            
+
             # turn redis off
             handle_svc "redis" "off"
-            
-            # turn mongod and mongo-worker on
-            handle_svc "mongod" "on"
-            handle_svc "mongo-worker" "on"
 
-            # since the configuration files have been modified, those 
-            # changes need to be progpogated into relevant services, so 
-            # restart the services with updated configuration if they were 
-            # already running
-            "$SNAP/bin/push-config.sh" core-data core-metadata export-client support-notifications support-scheduler
+            # turn edgex-mongo and mongod on
+            handle_svc "mongod" "on"
+            handle_svc "edgex-mongo" "on"
+
+            restart_db_services
         fi
 
         # save the database provider as mongodb for next invocation

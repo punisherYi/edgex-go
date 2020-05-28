@@ -16,7 +16,6 @@
 package config
 
 import (
-	"github.com/edgexfoundry/edgex-go/internal/pkg/config"
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstoreclient"
 
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/interfaces"
@@ -86,10 +85,12 @@ func (c *ConfigurationStruct) GetLogLevel() string {
 	return c.Writable.LogLevel
 }
 
-// SetLogLevel updates the log level in the ConfigurationStruct.
-func (c *ConfigurationStruct) SetRegistryInfo(registryInfo bootstrapConfig.RegistryInfo) {}
+// GetRegistryInfo returns the RegistryInfo from the ConfigurationStruct.
+func (c *ConfigurationStruct) GetRegistryInfo() bootstrapConfig.RegistryInfo {
+	return bootstrapConfig.RegistryInfo{}
+}
 
 // GetDatabaseInfo returns a database information map.
-func (c *ConfigurationStruct) GetDatabaseInfo() config.DatabaseInfo {
+func (c *ConfigurationStruct) GetDatabaseInfo() map[string]bootstrapConfig.Database {
 	return nil
 }

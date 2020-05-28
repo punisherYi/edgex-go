@@ -19,17 +19,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/edgexfoundry/edgex-go/internal/security/proxy/config"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/edgexfoundry/edgex-go/internal/security/proxy/config"
 
 	"github.com/edgexfoundry/edgex-go/internal"
 
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
+
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/config"
 )
 
 type CertUploadErrorType int
@@ -37,6 +42,9 @@ type CertUploadErrorType int
 const (
 	CertExisting  CertUploadErrorType = 0
 	InternalError CertUploadErrorType = 1
+
+	// AddProxyRoutesEnv is the environment variable name for adding the additional Kong routes for app services
+	AddProxyRoutesEnv = "ADD_PROXY_ROUTE"
 )
 
 type CertError struct {
@@ -49,20 +57,24 @@ func (ce *CertError) Error() string {
 }
 
 type Service struct {
-	client        internal.HttpCaller
-	loggingClient logger.LoggingClient
-	configuration *config.ConfigurationStruct
+	client           internal.HttpCaller
+	loggingClient    logger.LoggingClient
+	configuration    *config.ConfigurationStruct
+	additionalRoutes string
+	routes           map[string]*KongRoute
 }
 
 func NewService(
 	r internal.HttpCaller,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	configuration *config.ConfigurationStruct) Service {
 
 	return Service{
-		client:        r,
-		loggingClient: loggingClient,
-		configuration: configuration,
+		client:           r,
+		loggingClient:    lc,
+		configuration:    configuration,
+		additionalRoutes: strings.TrimSpace(os.Getenv(AddProxyRoutesEnv)),
+		routes:           make(map[string]*KongRoute),
 	}
 }
 
@@ -116,8 +128,8 @@ func (s *Service) ResetProxy() error {
 	return nil
 }
 
-func (s *Service) Init(cert CertificateLoader) error {
-	postErr := s.postCert(cert)
+func (s *Service) Init(cp bootstrapConfig.CertKeyPair) error {
+	postErr := s.postCert(cp)
 	if postErr != nil {
 		switch postErr.reason {
 		case CertExisting:
@@ -130,7 +142,17 @@ func (s *Service) Init(cert CertificateLoader) error {
 		}
 	}
 
-	for clientName, client := range s.configuration.Clients {
+	addRoutesFromEnv, parseErr := s.parseAdditionalProxyRoutes()
+
+	if parseErr != nil {
+		s.loggingClient.Error(fmt.Sprintf(
+			"failed to parse additional proxy Kong routes from env %s: %s",
+			s.additionalRoutes, parseErr.Error()))
+	}
+
+	mergedClients := s.mergeRoutesWith(addRoutesFromEnv)
+
+	for clientName, client := range mergedClients {
 		serviceParams := &KongService{
 			Name:     strings.ToLower(clientName),
 			Host:     client.Host,
@@ -147,6 +169,7 @@ func (s *Service) Init(cert CertificateLoader) error {
 			Paths: []string{"/" + strings.ToLower(clientName)},
 			Name:  strings.ToLower(clientName),
 		}
+
 		err = s.initKongRoutes(routeParams, strings.ToLower(clientName))
 		if err != nil {
 			return err
@@ -167,13 +190,104 @@ func (s *Service) Init(cert CertificateLoader) error {
 	return nil
 }
 
-func (s *Service) postCert(cert CertificateLoader) *CertError {
-	cp, err := cert.Load()
+// parseAdditionalProxyRoutes is to parse out the value of env AddProxyRoutesEnv
+// into key / value pairs of map [string]bootstrapConfig.ClientInfo
+// where key is service name, and value is the service ClientInfo
+// the env should contain the list of comma separated entries with the format of
+// Name.URL to be considered well-formed
+// Name is used as the key of service name
+// URL should be well-formed as protocol://hostName:portNumber
+// and is parsed into bootstrapConfig.ClientInfo structure if valid
+// returns error if not valid
+func (s *Service) parseAdditionalProxyRoutes() (map[string]bootstrapConfig.ClientInfo, error) {
+	emptyMap := make(map[string]bootstrapConfig.ClientInfo)
 
-	if err != nil {
-		return &CertError{err.Error(), InternalError}
+	routesFromEnv := strings.Split(s.additionalRoutes, ",")
+
+	additionalClientMap := make(map[string]bootstrapConfig.ClientInfo)
+	for _, rt := range routesFromEnv {
+		route := strings.TrimSpace(rt)
+		// ignore the empty route
+		if route == "" {
+			continue
+		}
+
+		if !strings.Contains(route, ".") {
+			// Invalid syntax for route, it should contain dot (.)
+			return emptyMap, fmt.Errorf(
+				"invalid syntax for defining additional kong route %s, it should contain dot . as separator", route)
+		}
+
+		routePair := strings.Split(route, ".")
+		serviceName := strings.TrimSpace(routePair[0])
+		routeURL := strings.TrimSpace(routePair[1])
+
+		if serviceName == "" {
+			// service name should not be empty
+			return emptyMap, errors.New("service name for kong route should not be empty")
+		}
+
+		// sanity check to validate the well-formness of routeURL
+		// and also parse out the protocol, hostname, and port number if it is good
+		url, err := url.Parse(routeURL)
+		if err != nil {
+			return emptyMap, fmt.Errorf(
+				"malformed route URL for additional kong route %s: %s", routeURL, err.Error())
+		}
+		hostName, port, err := net.SplitHostPort(url.Host)
+		if err != nil {
+			return emptyMap, fmt.Errorf(
+				"malformed host in route URL for additional kong route %s: %s", url.Host, err.Error())
+		}
+		portNum, err := strconv.Atoi(port)
+		if err != nil {
+			return emptyMap, fmt.Errorf(
+				"invalid port, expecting integer as port number for additional kong route %s: %s", port, err.Error())
+		}
+
+		clientInfo := bootstrapConfig.ClientInfo{
+			Protocol: url.Scheme,
+			Host:     hostName,
+			Port:     portNum,
+		}
+
+		additionalClientMap[serviceName] = clientInfo
 	}
 
+	return additionalClientMap, nil
+}
+
+func (s *Service) mergeRoutesWith(additional map[string]bootstrapConfig.ClientInfo) map[string]bootstrapConfig.ClientInfo {
+	// merging ignores the duplicate keys with the current internal map
+
+	if len(additional) == 0 {
+		return s.configuration.Clients
+	}
+
+	if len(s.configuration.Clients) == 0 {
+		return additional
+	}
+
+	merged := make(map[string]bootstrapConfig.ClientInfo)
+	for serviceName, client := range s.configuration.Clients {
+		merged[serviceName] = client
+	}
+
+	for serviceName, client := range additional {
+		_, exists := merged[serviceName]
+		if exists {
+			s.loggingClient.Warn(fmt.Sprintf(
+				"attempting to add additional service name %s that already exists in the config. "+
+					"Ignoring additional", serviceName))
+			continue
+		}
+		merged[serviceName] = client
+	}
+
+	return merged
+}
+
+func (s *Service) postCert(cp bootstrapConfig.CertKeyPair) *CertError {
 	body := &CertInfo{
 		Cert: cp.Cert,
 		Key:  cp.Key,
@@ -229,6 +343,7 @@ func (s *Service) initKongService(service *KongService) error {
 		"protocol": {service.Protocol},
 	}
 	tokens := []string{s.configuration.KongURL.GetProxyBaseURL(), ServicesPath}
+
 	req, err := http.NewRequest(http.MethodPost, strings.Join(tokens, "/"), strings.NewReader(formVals.Encode()))
 	if err != nil {
 		return fmt.Errorf("failed to construct http POST form request: %s %s", service.Name, err.Error())
@@ -265,6 +380,7 @@ func (s *Service) initKongRoutes(r *KongRoute, name string) error {
 		return err
 	}
 	tokens := []string{s.configuration.KongURL.GetProxyBaseURL(), ServicesPath, name, "routes"}
+
 	req, err := http.NewRequest(http.MethodPost, strings.Join(tokens, "/"), strings.NewReader(string(data)))
 	if err != nil {
 		e := fmt.Sprintf("failed to set up routes for %s with error %s", name, err.Error())
@@ -283,6 +399,7 @@ func (s *Service) initKongRoutes(r *KongRoute, name string) error {
 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusConflict:
+		s.routes[name] = r
 		s.loggingClient.Info(fmt.Sprintf("successful to set up route for %s", name))
 		break
 	default:

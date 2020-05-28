@@ -32,9 +32,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func LoadRestRoutes(dic *di.Container) *mux.Router {
-	r := mux.NewRouter()
-
+func loadRestRoutes(r *mux.Router, dic *di.Container) {
 	// Ping Resource
 	r.HandleFunc(
 		clients.ApiPingRoute,
@@ -67,8 +65,6 @@ func LoadRestRoutes(dic *di.Container) *mux.Router {
 	r.Use(correlation.ManageHeader)
 	r.Use(correlation.OnResponseComplete)
 	r.Use(correlation.OnRequestBegin)
-
-	return r
 }
 
 func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
@@ -107,7 +103,8 @@ func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
 				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
 				commandContainer.MetadataDeviceClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				&http.Client{})
 		}).Methods(http.MethodGet)
 	d.HandleFunc(
 		"/{"+ID+"}/"+COMMAND+"/{"+COMMANDID+"}",
@@ -118,8 +115,19 @@ func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
 				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
 				commandContainer.MetadataDeviceClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				&http.Client{})
 		}).Methods(http.MethodPut)
+	// In the block of code above, as well as in the one that follows below,
+	// there are two references each to http.Client. Putting them into the
+	// DI container(dic) and retrieving the value like we do for other components
+	// would bring about further consistency in the code base. But the concern
+	// then would be the creation of a race condition because we can only have a
+	// single http.Client instance in the dic. In turn, every invocation of this
+	// REST handler would be served by a different goroutine. This would create
+	// a situation where each one of them would use the same http.Client instance,
+	// resulting in state divergence, misalignment. So the decision is to not
+	// put this into the DI container(dic).
 
 	// /api/<version>/device/name
 	dn := d.PathPrefix("/" + NAME).Subrouter()
@@ -133,7 +141,8 @@ func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
 				container.DBClientFrom(dic.Get),
 				commandContainer.MetadataDeviceClientFrom(dic.Get),
 				commandContainer.ConfigurationFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+			)
 		}).Methods(http.MethodGet)
 	dn.HandleFunc(
 		"/{"+NAME+"}/"+COMMAND+"/{"+COMMANDNAME+"}",
@@ -144,7 +153,8 @@ func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
 				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
 				commandContainer.MetadataDeviceClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				&http.Client{})
 		}).Methods(http.MethodGet)
 	dn.HandleFunc(
 		"/{"+NAME+"}/"+COMMAND+"/{"+COMMANDNAME+"}",
@@ -155,6 +165,7 @@ func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
 				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
 				commandContainer.MetadataDeviceClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				&http.Client{})
 		}).Methods(http.MethodPut)
 }

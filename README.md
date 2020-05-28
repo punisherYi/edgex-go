@@ -13,7 +13,8 @@ They can be launched easily with **docker-compose**.
 The simplest way to get started is to fetch the latest docker-compose.yml and start the EdgeX containers:
 
 ```sh
-wget https://raw.githubusercontent.com/edgexfoundry/developer-scripts/master/releases/edinburgh/compose-files/docker-compose-edinburgh-1.0.1.yml
+wget -O docker-compose.yml \
+https://raw.githubusercontent.com/edgexfoundry/developer-scripts/master/releases/nightly-build/compose-files/docker-compose-nexus-redis.yml
 docker-compose up -d
 ```
 
@@ -50,8 +51,8 @@ on the snap, including how to install it, please refer to [EdgeX snap](https://g
 
 #### Go
 
-- The current targeted version of the Go language runtime for release artifacts is v1.12.x
-- The minimum supported version of the Go language runtime is v1.11.x (currently v1.11.13)
+- The current targeted version of the Go language runtime for release artifacts is v1.13.x
+- The minimum supported version of the Go language runtime is v1.13.x (currently v1.13)
 
 #### pkg-config
 
@@ -141,7 +142,7 @@ Follow the "Installation and Execution" steps above for obtaining and building t
 make docker run_docker
 ```
 
-**Note** The default behavior is to use Mongo for the database, use the command `make EDGEX_DB=redis run_docker` to start EdgeX with Redis.
+**Note** The default behavior is to use Redis for the database, use the command `make EDGEX_DB=mongo run_docker` to start EdgeX with Mongo.
 
 # Community
 

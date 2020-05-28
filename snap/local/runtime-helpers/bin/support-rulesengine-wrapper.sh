@@ -12,7 +12,7 @@ fi
 JAVA="$SNAP"/usr/lib/jvm/java-8-openjdk-"$ARCH"/jre/bin/java
 
 $JAVA -jar -Djava.security.egd=file:/dev/urandom -Xmx100M \
-            -Dspring.cloud.consul.enabled=true \
-            -Dspring.cloud.consul.host=localhost \
-            -Dlogging.file="$SNAP_COMMON/logs/edgex-support-rulesengine.log" \
+            -Dlogging.file="$SNAP_COMMON"/logs/edgex-support-rulesengine.log \
+            -Drules.default.path="$SNAP_DATA"/support-rulesengine/rules \
+            -Drules.template.path="$SNAP_DATA"/support-rulesengine/templates \
             "$SNAP/jar/support-rulesengine/support-rulesengine.jar"

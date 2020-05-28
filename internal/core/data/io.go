@@ -10,16 +10,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/OneOfOne/xxhash"
+	"github.com/edgexfoundry/edgex-go/internal/core/data/config"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation/models"
 
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
-	"github.com/ugorji/go/codec"
 
-	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation/models"
+	"github.com/OneOfOne/xxhash"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
 	checksumContextKey = "payload-checksum"
+	maxEventSize       = int64(25 * 1e6) // 25 MB
 )
 
 // ErrUnsupportedContentType an error used when a request is received with an unsupported content type
@@ -53,25 +55,36 @@ func (jsonReader) Read(reader io.Reader, ctx *context.Context) (models.Event, er
 	return event, nil
 }
 
+// NewJsonReader creates a new instance of cborReader.
+func NewJsonReader() jsonReader {
+	return jsonReader{}
+}
+
 // cborReader handles unmarshaling of a CBOR request body payload
-type cborReader struct{}
+type cborReader struct {
+	configuration *config.ConfigurationStruct
+}
+
+// NewCborReader creates a new instance of cborReader.
+func NewCborReader(configuration *config.ConfigurationStruct) cborReader {
+	return cborReader{configuration: configuration}
+}
 
 // Read reads and converts the request's CBOR event data into an Event struct
-func (cborReader) Read(reader io.Reader, ctx *context.Context) (models.Event, error) {
+func (cr cborReader) Read(reader io.Reader, ctx *context.Context) (models.Event, error) {
 	c := context.WithValue(*ctx, clients.ContentType, clients.ContentTypeCBOR)
 	event := models.Event{}
-	bytes, err := ioutil.ReadAll(reader)
+	bytes, err := ioutil.ReadAll(io.LimitReader(reader, maxEventSize))
 	if err != nil {
 		return event, err
 	}
 
-	x := codec.CborHandle{}
-	err = codec.NewDecoderBytes(bytes, &x).Decode(&event)
+	err = cbor.Unmarshal(bytes, &event)
 	if err != nil {
 		return event, err
 	}
 
-	switch Configuration.Writable.ChecksumAlgo {
+	switch cr.configuration.Writable.ChecksumAlgo {
 	case ChecksumAlgoxxHash:
 		event.Checksum = fmt.Sprintf("%x", xxhash.Checksum64(bytes))
 	default:
@@ -85,13 +98,13 @@ func (cborReader) Read(reader io.Reader, ctx *context.Context) (models.Event, er
 }
 
 // NewRequestReader returns a BodyReader capable of processing the request body
-func NewRequestReader(request *http.Request) EventReader {
+func NewRequestReader(request *http.Request, configuration *config.ConfigurationStruct) EventReader {
 	contentType := request.Header.Get(clients.ContentType)
 
 	switch strings.ToLower(contentType) {
 	case clients.ContentTypeCBOR:
-		return cborReader{}
+		return NewCborReader(configuration)
 	default:
-		return jsonReader{}
+		return NewJsonReader()
 	}
 }

@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-FROM golang:1.12-alpine AS builder
+FROM golang:1.13-alpine AS builder
 
 ENV GO111MODULE=on
 WORKDIR /go/src/github.com/edgexfoundry/edgex-go
@@ -39,5 +39,5 @@ EXPOSE $APP_PORT
 WORKDIR /
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-command/Attribution.txt /
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-command/core-command /
-COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-command/res/docker/configuration.toml /res/docker/configuration.toml
-ENTRYPOINT ["/core-command","--registry","--profile=docker","--confdir=/res"]
+COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-command/res/configuration.toml /res/configuration.toml
+ENTRYPOINT ["/core-command","-cp=consul.http://edgex-core-consul:8500","--registry","--confdir=/res"]

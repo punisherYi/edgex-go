@@ -31,9 +31,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func LoadRestRoutes(dic *di.Container) *mux.Router {
-	r := mux.NewRouter()
-
+func loadRestRoutes(r *mux.Router, dic *di.Container) {
 	// Ping Resource
 	r.HandleFunc(
 		clients.ApiPingRoute,
@@ -72,8 +70,6 @@ func LoadRestRoutes(dic *di.Container) *mux.Router {
 	r.Use(correlation.ManageHeader)
 	r.Use(correlation.OnResponseComplete)
 	r.Use(correlation.OnRequestBegin)
-
-	return r
 }
 
 func loadDeviceRoutes(b *mux.Router, dic *di.Container) {
@@ -397,8 +393,11 @@ func loadDeviceProfileRoutes(b *mux.Router, dic *di.Container) {
 			restAddProfileByYaml(
 				w,
 				r,
+				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				metadataContainer.CoreDataValueDescriptorClientFrom(dic.Get),
+				metadataContainer.ConfigurationFrom(dic.Get))
 		}).Methods(http.MethodPost)
 	dp.HandleFunc(
 		"/"+UPLOAD,
@@ -406,8 +405,11 @@ func loadDeviceProfileRoutes(b *mux.Router, dic *di.Container) {
 			restAddProfileByYamlRaw(
 				w,
 				r,
+				bootstrapContainer.LoggingClientFrom(dic.Get),
 				container.DBClientFrom(dic.Get),
-				errorContainer.ErrorHandlerFrom(dic.Get))
+				errorContainer.ErrorHandlerFrom(dic.Get),
+				metadataContainer.CoreDataValueDescriptorClientFrom(dic.Get),
+				metadataContainer.ConfigurationFrom(dic.Get))
 		}).Methods(http.MethodPost)
 	dp.HandleFunc(
 		"/"+MODEL+"/{"+MODEL+"}",

@@ -17,9 +17,10 @@ package getconfig
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/edgexfoundry/edgex-go/internal"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/endpoint"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/urlclient"
 	agentClients "github.com/edgexfoundry/edgex-go/internal/system/agent/clients"
 
 	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/config"
@@ -27,8 +28,6 @@ import (
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/general"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/types"
-
 	"github.com/edgexfoundry/go-mod-registry/registry"
 )
 
@@ -44,13 +43,13 @@ type executor struct {
 func NewExecutor(
 	genClients *agentClients.General,
 	registryClient registry.Client,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	serviceProtocol string) *executor {
 
 	return &executor{
 		genClients:      genClients,
 		registryClient:  registryClient,
-		loggingClient:   loggingClient,
+		loggingClient:   lc,
 		serviceProtocol: serviceProtocol,
 	}
 }
@@ -65,8 +64,12 @@ func (e executor) Do(ctx context.Context, serviceName string) (string, error) {
 		}
 
 		// Service unknown to SMA, so ask the Registry whether `serviceName` is available.
-		if err := e.registryClient.IsServiceAvailable(serviceName); err != nil {
+		ok, err := e.registryClient.IsServiceAvailable(serviceName)
+		if err != nil {
 			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("service %s is not available", serviceName)
 		}
 
 		e.loggingClient.Info(fmt.Sprintf("Registry responded with %s available", serviceName))
@@ -82,16 +85,19 @@ func (e executor) Do(ctx context.Context, serviceName string) (string, error) {
 			Host:     ep.Host,
 			Port:     ep.Port,
 		}
-		params := types.EndpointParams{
-			ServiceKey:  ep.ServiceId,
-			Path:        "/",
-			UseRegistry: true,
-			Url:         configClient.Url() + clients.ApiConfigRoute,
-			Interval:    internal.ClientMonitorDefault,
-		}
 
 		// Add the serviceName key to the map where the value is the respective GeneralClient
-		client = general.NewGeneralClient(params, endpoint.Endpoint{RegistryClient: &e.registryClient})
+		client = general.NewGeneralClient(
+			urlclient.New(
+				ctx,
+				&sync.WaitGroup{},
+				e.registryClient,
+				ep.ServiceId,
+				"/",
+				internal.ClientMonitorDefault,
+				configClient.Url()+clients.ApiConfigRoute,
+			),
+		)
 		e.genClients.Set(ep.ServiceId, client)
 	}
 

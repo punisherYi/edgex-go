@@ -20,8 +20,9 @@ import (
 	"sync"
 
 	dataContainer "github.com/edgexfoundry/edgex-go/internal/core/data/container"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/endpoint"
+	errorContainer "github.com/edgexfoundry/edgex-go/internal/pkg/container"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/errorconcept"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/urlclient"
 
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/container"
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/startup"
@@ -29,75 +30,121 @@ import (
 
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/metadata"
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/types"
-
 	"github.com/edgexfoundry/go-mod-messaging/messaging"
 	msgTypes "github.com/edgexfoundry/go-mod-messaging/pkg/types"
+
+	"github.com/gorilla/mux"
 )
 
-// Global variables
-var Configuration = &ConfigurationStruct{}
+// Bootstrap contains references to dependencies required by the BootstrapHandler.
+type Bootstrap struct {
+	router *mux.Router
+}
 
-// TODO: Refactor names in separate PR: See comments on PR #1133
-var mdc metadata.DeviceClient
-var msc metadata.DeviceServiceClient
-
-var httpErrorHandler errorconcept.ErrorHandler
+// NewBootstrap is a factory method that returns an initialized Bootstrap receiver struct.
+func NewBootstrap(router *mux.Router) *Bootstrap {
+	return &Bootstrap{
+		router: router,
+	}
+}
 
 // BootstrapHandler fulfills the BootstrapHandler contract and performs initialization needed by the data service.
-func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer startup.Timer, dic *di.Container) bool {
-	// update global variables.
-	loggingClient := container.LoggingClientFrom(dic.Get)
-	httpErrorHandler = errorconcept.NewErrorHandler(loggingClient)
+func (b *Bootstrap) BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, _ startup.Timer, dic *di.Container) bool {
+	loadRestRoutes(b.router, dic)
 
-	chEvents := make(chan interface{}, 100)
-	// initialize event handlers
-	initEventHandlers(loggingClient, chEvents)
-
-	// initialize clients required by service.
+	configuration := dataContainer.ConfigurationFrom(dic.Get)
 	registryClient := container.RegistryFrom(dic.Get)
-	mdc = metadata.NewDeviceClient(
-		types.EndpointParams{
-			ServiceKey:  clients.CoreMetaDataServiceKey,
-			Path:        clients.ApiDeviceRoute,
-			UseRegistry: registryClient != nil,
-			Url:         Configuration.Clients["Metadata"].Url() + clients.ApiDeviceRoute,
-			Interval:    Configuration.Service.ClientMonitor,
-		},
-		endpoint.Endpoint{RegistryClient: &registryClient})
-	msc = metadata.NewDeviceServiceClient(
-		types.EndpointParams{
-			ServiceKey:  clients.CoreMetaDataServiceKey,
-			Path:        clients.ApiDeviceServiceRoute,
-			UseRegistry: registryClient != nil,
-			Url:         Configuration.Clients["Metadata"].Url() + clients.ApiDeviceRoute,
-			Interval:    Configuration.Service.ClientMonitor,
-		},
-		endpoint.Endpoint{RegistryClient: &registryClient})
+	lc := container.LoggingClientFrom(dic.Get)
+
+	mdc := metadata.NewDeviceClient(
+		urlclient.New(
+			ctx,
+			wg,
+			registryClient,
+			clients.CoreMetaDataServiceKey,
+			clients.ApiDeviceRoute,
+			configuration.Service.ClientMonitor,
+			configuration.Clients["Metadata"].Url()+clients.ApiDeviceRoute,
+		),
+	)
+	msc := metadata.NewDeviceServiceClient(
+		urlclient.New(
+			ctx,
+			wg,
+			registryClient,
+			clients.CoreMetaDataServiceKey,
+			clients.ApiDeviceServiceRoute,
+			configuration.Service.ClientMonitor,
+			configuration.Clients["Metadata"].Url()+clients.ApiDeviceRoute,
+		),
+	)
 
 	// Create the messaging client
 	msgClient, err := messaging.NewMessageClient(
 		msgTypes.MessageBusConfig{
 			PublishHost: msgTypes.HostInfo{
-				Host:     Configuration.MessageQueue.Host,
-				Port:     Configuration.MessageQueue.Port,
-				Protocol: Configuration.MessageQueue.Protocol,
+				Host:     configuration.MessageQueue.Host,
+				Port:     configuration.MessageQueue.Port,
+				Protocol: configuration.MessageQueue.Protocol,
 			},
-			Type: Configuration.MessageQueue.Type,
+			Type:     configuration.MessageQueue.Type,
+			Optional: configuration.MessageQueue.Optional,
 		})
 
 	if err != nil {
-		loggingClient.Error(fmt.Sprintf("failed to create messaging client: %s", err.Error()))
+		lc.Error(fmt.Sprintf("failed to create messaging client: %s", err.Error()))
 		return false
 	}
 
+	err = msgClient.Connect()
+	if err != nil {
+		lc.Error(fmt.Sprintf("failed to connect to message bus: %s", err.Error()))
+		return false
+	}
+
+	// Setup special "defer" go func that will disconnect from the message bus when the service is exiting
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				if err := msgClient.Disconnect(); err != nil {
+					lc.Error("failed to disconnect from the Message Bus")
+					return
+				}
+				lc.Info("Message Bus disconnected")
+				return
+			}
+		}
+	}()
+
+	lc.Info(fmt.Sprintf(
+		"Connected to %s Message Bus @ %s://%s:%d publishing on '%s' topic",
+		configuration.MessageQueue.Type,
+		configuration.MessageQueue.Protocol,
+		configuration.MessageQueue.Host,
+		configuration.MessageQueue.Port,
+		configuration.MessageQueue.Topic))
+
+	chEvents := make(chan interface{}, 100)
+	// initialize event handlers
+	initEventHandlers(lc, chEvents, mdc, msc, configuration)
+
 	dic.Update(di.ServiceConstructorMap{
+		dataContainer.MetadataDeviceClientName: func(get di.Get) interface{} {
+			return mdc
+		},
 		dataContainer.MessagingClientName: func(get di.Get) interface{} {
 			return msgClient
 		},
 		dataContainer.EventsChannelName: func(get di.Get) interface{} {
 			return chEvents
-		}})
+		},
+		errorContainer.ErrorHandlerName: func(get di.Get) interface{} {
+			return errorconcept.NewErrorHandler(lc)
+		},
+	})
 
 	return true
 }

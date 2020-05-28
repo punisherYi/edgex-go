@@ -10,16 +10,17 @@ Port = 48082
 Protocol = 'http'
 MaxResultCount = 50000
 StartupMsg = 'This is the Core Command Microservice'
-Timeout = 5000
+Timeout = 45000
 
 [Registry]
 Host = 'localhost'
 Port = 8500
 Type = 'consul'
 
+# Remote and file logging disabled so only stdout logging is used
 [Logging]
 EnableRemote = false
-File = './logs/edgex-core-command.log'
+File = ''
 
 [Clients]
   [Clients.Metadata]
@@ -36,11 +37,11 @@ File = './logs/edgex-core-command.log'
   [Databases.Primary]
   Host = 'localhost'
   Name = 'metadata'
-  Password = ''
-  Port = 27017
-  Username = ''
+  Password = 'password'
+  Username = 'meta'
+  Port = 6379
   Timeout = 5000
-  Type = 'mongodb'
+  Type = 'redisdb'
 
 [SecretStore]
 Host = 'localhost'
@@ -57,7 +58,6 @@ AdditionalRetryAttempts = 10
 RetryWaitPeriod = "1s"
   [SecretStore.Authentication]
   AuthType = 'X-Vault-Token'
-  AuthToken = 'edgex'
 
 [Startup]
 Duration = 30

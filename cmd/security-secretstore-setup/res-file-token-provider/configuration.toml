@@ -1,0 +1,19 @@
+[SecretService]
+Scheme = "https"
+Server = "edgex-vault"
+ServerName = "edgex-vault"
+Port = 8200
+CaFilePath = '/tmp/edgex/secrets/ca/ca.pem'
+
+[TokenFileProvider]
+PrivilegedTokenPath = "/run/edgex/secrets/tokenprovider/secrets-token.json"
+ConfigFile = "res-file-token-provider/token-config.json"
+OutputDir = "/tmp/edgex/secrets"
+OutputFilename = "secrets-token.json"
+
+[Writable]
+LogLevel = 'DEBUG'
+
+[Logging]
+EnableRemote = false
+File = ''

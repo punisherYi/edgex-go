@@ -1,5 +1,5 @@
 [Writable]
-Persistence = 'database'
+Persistence = 'file'
 LogLevel = 'INFO'
 
 [Service]
@@ -18,18 +18,13 @@ Host = 'localhost'
 Port = 8500
 Type = 'consul'
 
+# Remote and file logging disabled so only stdout logging is used
 [Logging]
-File = './logs/edgex-support-logging.log'
+File = ''
 
 [Databases]
   [Databases.Primary]
-  Host = 'localhost'
-  Name = 'logging'
-  Password = ''
-  Port = 27017
-  Username = ''
-  Timeout = 5000
-  Type = 'mongodb'
+  Type = 'file'
 
 [SecretStore]
 Host = 'localhost'
@@ -45,7 +40,6 @@ AdditionalRetryAttempts = 10
 RetryWaitPeriod = "1s"
   [SecretStore.Authentication]
   AuthType = 'X-Vault-Token'
-  AuthToken = 'edgex'
 
 [Startup]
 Duration = 30

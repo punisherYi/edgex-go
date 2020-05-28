@@ -19,8 +19,7 @@ import (
 	"sync"
 
 	"github.com/edgexfoundry/edgex-go/internal"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/config"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/endpoint"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/urlclient"
 	"github.com/edgexfoundry/edgex-go/internal/system/agent/clients"
 	"github.com/edgexfoundry/edgex-go/internal/system/agent/container"
 	"github.com/edgexfoundry/edgex-go/internal/system/agent/direct"
@@ -32,12 +31,27 @@ import (
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/startup"
 	"github.com/edgexfoundry/go-mod-bootstrap/di"
 
+	contracts "github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/general"
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/types"
+	"github.com/gorilla/mux"
 )
 
+// Bootstrap contains references to dependencies required by the BootstrapHandler.
+type Bootstrap struct {
+	router *mux.Router
+}
+
+// NewBootstrap is a factory method that returns an initialized Bootstrap receiver struct.
+func NewBootstrap(router *mux.Router) *Bootstrap {
+	return &Bootstrap{
+		router: router,
+	}
+}
+
 // BootstrapHandler fulfills the BootstrapHandler contract.  It implements agent-specific initialization.
-func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer startup.Timer, dic *di.Container) bool {
+func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ startup.Timer, dic *di.Container) bool {
+	loadRestRoutes(b.router, dic)
+
 	configuration := container.ConfigurationFrom(dic.Get)
 
 	// validate metrics implementation
@@ -45,8 +59,8 @@ func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer star
 	case direct.MetricsMechanism:
 	case executor.MetricsMechanism:
 	default:
-		loggingClient := bootstrapContainer.LoggingClientFrom(dic.Get)
-		loggingClient.Error("the requested metrics mechanism is not supported")
+		lc := bootstrapContainer.LoggingClientFrom(dic.Get)
+		lc.Error("the requested metrics mechanism is not supported")
 		return false
 	}
 
@@ -92,22 +106,36 @@ func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer star
 		},
 	})
 
-	// initialize clients required by service.
 	generalClients := container.GeneralClientsFrom(dic.Get)
 	registryClient := bootstrapContainer.RegistryFrom(dic.Get)
-	for serviceKey, serviceName := range config.ListDefaultServices() {
+
+	for serviceKey, serviceName := range b.listDefaultServices() {
 		generalClients.Set(
 			serviceKey,
 			general.NewGeneralClient(
-				types.EndpointParams{
-					ServiceKey:  serviceKey,
-					Path:        "/",
-					UseRegistry: registryClient != nil,
-					Url:         configuration.Clients[serviceName].Url(),
-					Interval:    internal.ClientMonitorDefault,
-				},
-				endpoint.Endpoint{RegistryClient: &registryClient}))
+				urlclient.New(
+					ctx,
+					&sync.WaitGroup{},
+					registryClient,
+					serviceKey,
+					"/",
+					internal.ClientMonitorDefault,
+					configuration.Clients[serviceName].Url(),
+				),
+			),
+		)
 	}
 
 	return true
+}
+
+func (Bootstrap) listDefaultServices() map[string]string {
+	return map[string]string{
+		contracts.SupportNotificationsServiceKey: "Notifications",
+		contracts.CoreCommandServiceKey:          "Command",
+		contracts.CoreDataServiceKey:             "CoreData",
+		contracts.CoreMetaDataServiceKey:         "Metadata",
+		contracts.SupportLoggingServiceKey:       "Logging",
+		contracts.SupportSchedulerServiceKey:     "Scheduler",
+	}
 }

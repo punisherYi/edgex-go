@@ -18,9 +18,10 @@ Host = 'localhost'
 Port = 8500
 Type = 'consul'
 
+# Remote and file logging disabled so only stdout logging is used
 [Logging]
 EnableRemote = false
-File = './logs/edgex-support-notifications.log'
+File = ''
 
 [Clients]
   [Clients.Logging]
@@ -32,11 +33,11 @@ File = './logs/edgex-support-notifications.log'
   [Databases.Primary]
   Host = 'localhost'
   Name = 'notifications'
-  Password = ''
-  Port = 27017
-  Username = ''
+  Password = 'password'
+  Username = 'notifications'
+  Port = 6379
   Timeout = 5000
-  Type = 'mongodb'
+  Type = 'redisdb'
 
 [Smtp]
   Host = 'smtp.gmail.com'
@@ -61,7 +62,6 @@ AdditionalRetryAttempts = 10
 RetryWaitPeriod = "1s"
   [SecretStore.Authentication]
   AuthType = 'X-Vault-Token'
-  AuthToken = 'edgex'
 
 [Startup]
 Duration = 30

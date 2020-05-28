@@ -39,12 +39,12 @@ import (
 
 func restGetAllDeviceProfiles(
 	w http.ResponseWriter,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
 	errorHandler errorconcept.ErrorHandler,
 	configuration *config.ConfigurationStruct) {
 
-	op := device_profile.NewGetAllExecutor(configuration.Service, dbClient, loggingClient)
+	op := device_profile.NewGetAllExecutor(configuration.Service, dbClient, lc)
 	res, err := op.Execute()
 	if err != nil {
 		errorHandler.HandleOneVariant(
@@ -56,13 +56,13 @@ func restGetAllDeviceProfiles(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(&res)
+	_ = json.NewEncoder(w).Encode(&res)
 }
 
 func restAddDeviceProfile(
 	w http.ResponseWriter,
 	r *http.Request,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
 	errorHandler errorconcept.ErrorHandler,
 	vdc coredata.ValueDescriptorClient,
@@ -80,13 +80,13 @@ func restAddDeviceProfile(
 		// will fail during the creation process later on.
 		nameOp := device_profile.NewGetProfileName(dp.Name, dbClient)
 		_, err := nameOp.Execute()
-		// The operator will return an ItemNotFound error if the DeviceProfile can not be found.
+		// The operator will return an DuplicateName error if the DeviceProfile exist.
 		if err == nil {
 			errorHandler.Handle(w, err, errorconcept.DeviceProfile.DuplicateName)
 			return
 		}
 
-		op := device_profile.NewAddValueDescriptorExecutor(r.Context(), vdc, loggingClient, dp.DeviceResources...)
+		op := device_profile.NewAddValueDescriptorExecutor(r.Context(), vdc, lc, dp.DeviceResources...)
 		err = op.Execute()
 		if err != nil {
 			errorHandler.HandleOneVariant(
@@ -104,7 +104,7 @@ func restAddDeviceProfile(
 func restUpdateDeviceProfile(
 	w http.ResponseWriter,
 	r *http.Request,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
 	errorHandler errorconcept.ErrorHandler,
 	vdc coredata.ValueDescriptorClient,
@@ -119,7 +119,7 @@ func restUpdateDeviceProfile(
 	}
 
 	if configuration.Writable.EnableValueDescriptorManagement {
-		vdOp := device_profile.NewUpdateValueDescriptorExecutor(from, dbClient, vdc, loggingClient, r.Context())
+		vdOp := device_profile.NewUpdateValueDescriptorExecutor(r.Context(), from, dbClient, vdc, lc)
 		err := vdOp.Execute()
 		if err != nil {
 			errorHandler.HandleManyVariants(
@@ -151,11 +151,11 @@ func restUpdateDeviceProfile(
 	}
 
 	// Notify Associates
-	err = notifyProfileAssociates(dp, dbClient, http.MethodPut, loggingClient, errorHandler, configuration)
+	err = notifyProfileAssociates(dp, dbClient, http.MethodPut, lc, errorHandler, configuration)
 	if err != nil {
 		// Log the error but do not change the response to the client. We do not want this to affect the overall status
 		// of the operation
-		loggingClient.Warn("Error while notifying profile associates of update: ", err.Error())
+		lc.Warn("Error while notifying profile associates of update: ", err.Error())
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
@@ -179,7 +179,7 @@ func restGetProfileByProfileId(
 		return
 	}
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restDeleteProfileByProfileId(
@@ -246,8 +246,11 @@ func restDeleteProfileByName(
 func restAddProfileByYaml(
 	w http.ResponseWriter,
 	r *http.Request,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
-	errorHandler errorconcept.ErrorHandler) {
+	errorHandler errorconcept.ErrorHandler,
+	vdc coredata.ValueDescriptorClient,
+	configuration *config.ConfigurationStruct) {
 
 	f, _, err := r.FormFile("file")
 	if err != nil {
@@ -276,6 +279,29 @@ func restAddProfileByYaml(
 	if err != nil {
 		errorHandler.Handle(w, err, errorconcept.DeviceProfile.UnmarshalYaml_StatusInternalServer)
 		return
+	}
+
+	if configuration.Writable.EnableValueDescriptorManagement {
+		// Check if the device profile name is unique so that we do not create ValueDescriptors for a DeviceProfile that
+		// will fail during the creation process later on.
+		nameOp := device_profile.NewGetProfileName(dp.Name, dbClient)
+		_, err := nameOp.Execute()
+		// The operator will return an DuplicateName error if the DeviceProfile exist.
+		if err == nil {
+			errorHandler.Handle(w, err, errorconcept.DeviceProfile.DuplicateName)
+			return
+		}
+
+		op := device_profile.NewAddValueDescriptorExecutor(r.Context(), vdc, lc, dp.DeviceResources...)
+		err = op.Execute()
+		if err != nil {
+			errorHandler.HandleOneVariant(
+				w,
+				err,
+				errorconcept.NewServiceClientHttpError(err),
+				errorconcept.Default.InternalServerError)
+			return
+		}
 	}
 
 	// Avoid using the 'addDeviceProfile' function because we need to be backwards compatibility for API response codes.
@@ -308,8 +334,11 @@ func restAddProfileByYaml(
 func restAddProfileByYamlRaw(
 	w http.ResponseWriter,
 	r *http.Request,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
-	errorHandler errorconcept.ErrorHandler) {
+	errorHandler errorconcept.ErrorHandler,
+	vdc coredata.ValueDescriptorClient,
+	configuration *config.ConfigurationStruct) {
 
 	// Get the YAML string
 	body, err := ioutil.ReadAll(r.Body)
@@ -324,6 +353,29 @@ func restAddProfileByYamlRaw(
 	if err != nil {
 		errorHandler.Handle(w, err, errorconcept.DeviceProfile.UnmarshalYaml_StatusServiceUnavailable)
 		return
+	}
+
+	if configuration.Writable.EnableValueDescriptorManagement {
+		// Check if the device profile name is unique so that we do not create ValueDescriptors for a DeviceProfile that
+		// will fail during the creation process later on.
+		nameOp := device_profile.NewGetProfileName(dp.Name, dbClient)
+		_, err := nameOp.Execute()
+		// The operator will return an DuplicateName error if the DeviceProfile exist.
+		if err == nil {
+			errorHandler.Handle(w, err, errorconcept.DeviceProfile.DuplicateName)
+			return
+		}
+
+		op := device_profile.NewAddValueDescriptorExecutor(r.Context(), vdc, lc, dp.DeviceResources...)
+		err = op.Execute()
+		if err != nil {
+			errorHandler.HandleOneVariant(
+				w,
+				err,
+				errorconcept.NewServiceClientHttpError(err),
+				errorconcept.Default.InternalServerError)
+			return
+		}
 	}
 
 	addDeviceProfile(dp, dbClient, w, errorHandler)
@@ -382,7 +434,7 @@ func restGetProfileByModel(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restGetProfileWithLabel(
@@ -411,7 +463,7 @@ func restGetProfileWithLabel(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restGetProfileByManufacturerModel(
@@ -445,7 +497,7 @@ func restGetProfileByManufacturerModel(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restGetProfileByManufacturer(
@@ -473,7 +525,7 @@ func restGetProfileByManufacturer(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restGetProfileByName(
@@ -498,7 +550,7 @@ func restGetProfileByName(
 	}
 
 	w.Header().Set(clients.ContentType, clients.ContentTypeJSON)
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func restGetYamlProfileByName(
@@ -533,18 +585,11 @@ func restGetYamlProfileByName(
 	w.Write(out)
 }
 
-/*
- * Implementation: https://groups.google.com/forum/#!topic/golang-nuts/EZHtFOXA8UE
- * Response:
- * 	- 200: database generated identifier for the new device profile
- *	- 400: YAML file is empty
- *	- 409: an associated command's name is a duplicate for the profile or if the name is determined to not be uniqe with regard to others
- * 	- 503: Server Error
- */
+// restGetYamlProfileById looks up a device profile by its ID. It will be output in a YAML formatted string.
 func restGetYamlProfileById(
 	w http.ResponseWriter,
 	r *http.Request,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	dbClient interfaces.DBClient,
 	errorHandler errorconcept.ErrorHandler) {
 
@@ -562,7 +607,7 @@ func restGetYamlProfileById(
 		} else {
 			errorHandler.Handle(w, err, errorconcept.Default.InternalServerError)
 		}
-		loggingClient.Error(err.Error())
+		lc.Error(err.Error())
 		return
 	}
 
@@ -582,32 +627,32 @@ func notifyProfileAssociates(
 	dp models.DeviceProfile,
 	dl device.DeviceLoader,
 	action string,
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	errorHandler errorconcept.ErrorHandler,
 	configuration *config.ConfigurationStruct) error {
 
 	// Get the devices
-	op := device.NewProfileIdExecutor(configuration.Service, dl, loggingClient, dp.Id)
+	op := device.NewProfileIdExecutor(configuration.Service, dl, lc, dp.Id)
 	d, err := op.Execute()
 	if err != nil {
-		loggingClient.Error(err.Error())
+		lc.Error(err.Error())
 		return err
 	}
 
-	// Get the services for each device
+	// Get the services for each dev
 	// Use map as a Set
 	dsMap := map[string]models.DeviceService{}
 	ds := []models.DeviceService{}
-	for _, device := range d {
+	for _, dev := range d {
 		// Only add if not there
-		if _, ok := dsMap[device.Service.Id]; !ok {
-			dsMap[device.Service.Id] = device.Service
-			ds = append(ds, device.Service)
+		if _, ok := dsMap[dev.Service.Id]; !ok {
+			dsMap[dev.Service.Id] = dev.Service
+			ds = append(ds, dev.Service)
 		}
 	}
 
-	if err := notifyAssociates(ds, dp.Id, action, models.PROFILE, loggingClient); err != nil {
-		loggingClient.Error(err.Error())
+	if err := notifyAssociates(ds, dp.Id, action, models.PROFILE, lc); err != nil {
+		lc.Error(err.Error())
 		return err
 	}
 

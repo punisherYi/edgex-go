@@ -20,63 +20,14 @@
 package main
 
 import (
-	"flag"
-	"os"
+	"context"
 
-	"github.com/edgexfoundry/edgex-go/internal"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/usage"
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstore"
-	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/config"
-	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/container"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap"
-	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/di"
-
-	"github.com/edgexfoundry/go-mod-core-contracts/clients"
+	"github.com/gorilla/mux"
 )
 
 func main() {
-	startupTimer := startup.NewStartUpTimer(internal.BootRetrySecondsDefault, internal.BootTimeoutSecondsDefault)
-
-	if len(os.Args) < 2 {
-		usage.HelpCallbackSecuritySecretStore()
-	}
-
-	var insecureSkipVerify bool
-	var vaultInterval int
-	var configDir, profileDir string
-	var useRegistry bool
-
-	flag.BoolVar(&insecureSkipVerify, "insecureSkipVerify", false, "skip server side SSL verification, mainly for self-signed cert")
-	flag.IntVar(&vaultInterval, "vaultInterval", 30, "time to wait between checking Vault status in seconds.")
-	flag.BoolVar(&useRegistry, "registry", false, "Indicates the service should use registry service.")
-	flag.BoolVar(&useRegistry, "r", false, "Indicates the service should use registry service.")
-	flag.StringVar(&profileDir, "profile", "", "Specify a profile other than default.")
-	flag.StringVar(&profileDir, "p", "", "Specify a profile other than default.")
-	flag.StringVar(&configDir, "confdir", "", "Specify local configuration directory")
-
-	flag.Usage = usage.HelpCallbackSecuritySecretStore
-	flag.Parse()
-
-	configuration := &config.ConfigurationStruct{}
-	dic := di.NewContainer(di.ServiceConstructorMap{
-		container.ConfigurationName: func(get di.Get) interface{} {
-			return configuration
-		},
-	})
-	bootstrap.Run(
-		configDir,
-		profileDir,
-		internal.ConfigFileName,
-		useRegistry,
-		clients.SecuritySecretStoreSetupServiceKey,
-		configuration,
-		startupTimer,
-		dic,
-		[]interfaces.BootstrapHandler{
-			secretstore.NewBootstrapHandler(insecureSkipVerify, vaultInterval).Handler,
-		},
-	)
+	ctx, cancel := context.WithCancel(context.Background())
+	secretstore.Main(ctx, cancel, mux.NewRouter(), nil)
 }

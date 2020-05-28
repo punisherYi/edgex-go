@@ -19,10 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/edgexfoundry/edgex-go/internal"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/endpoint"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/telemetry"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/urlclient"
 	"github.com/edgexfoundry/edgex-go/internal/system"
 	agentClients "github.com/edgexfoundry/edgex-go/internal/system/agent/clients"
 	"github.com/edgexfoundry/edgex-go/internal/system/agent/concurrent"
@@ -33,8 +34,6 @@ import (
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/general"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/types"
-
 	"github.com/edgexfoundry/go-mod-registry/registry"
 )
 
@@ -48,13 +47,13 @@ type metrics struct {
 
 // NewMetrics is a factory function that returns an initialized metrics receiver struct.
 func NewMetrics(
-	loggingClient logger.LoggingClient,
+	lc logger.LoggingClient,
 	genClients *agentClients.General,
 	registryClient registry.Client,
 	serviceProtocol string) *metrics {
 
 	return &metrics{
-		loggingClient:   loggingClient,
+		loggingClient:   lc,
 		genClients:      genClients,
 		registryClient:  registryClient,
 		serviceProtocol: serviceProtocol,
@@ -74,8 +73,16 @@ func (m *metrics) metricsViaDirectService(ctx context.Context, serviceName strin
 		}
 
 		// Service unknown to SMA, so ask the Registry whether `serviceName` is available.
-		if err := m.registryClient.IsServiceAvailable(serviceName); err != nil {
+		ok, err := m.registryClient.IsServiceAvailable(serviceName)
+		if err != nil {
 			return system.Failure(serviceName, executor.Metrics, ExecutorType, err.Error())
+		}
+		if !ok {
+			return system.Failure(
+				serviceName,
+				executor.Metrics,
+				ExecutorType,
+				fmt.Sprintf("%s service not available", serviceName))
 		}
 
 		m.loggingClient.Info(fmt.Sprintf("Registry responded with %s serviceName available", serviceName))
@@ -98,16 +105,19 @@ func (m *metrics) metricsViaDirectService(ctx context.Context, serviceName strin
 			Host:     e.Host,
 			Port:     e.Port,
 		}
-		params := types.EndpointParams{
-			ServiceKey:  e.ServiceId,
-			Path:        "/",
-			UseRegistry: true,
-			Url:         configClient.Url() + clients.ApiMetricsRoute,
-			Interval:    internal.ClientMonitorDefault,
-		}
 
 		// Add the serviceName key to the map where the value is the respective GeneralClient
-		client = general.NewGeneralClient(params, endpoint.Endpoint{RegistryClient: &m.registryClient})
+		client = general.NewGeneralClient(
+			urlclient.New(
+				ctx,
+				&sync.WaitGroup{},
+				m.registryClient,
+				e.ServiceId,
+				"/",
+				internal.ClientMonitorDefault,
+				configClient.Url()+clients.ApiMetricsRoute,
+			),
+		)
 		m.genClients.Set(e.ServiceId, client)
 	}
 

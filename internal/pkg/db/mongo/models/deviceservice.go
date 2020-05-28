@@ -26,6 +26,9 @@ type deviceServiceTransform interface {
 	DeviceServiceToDBRef(model DeviceService) (dbRef mgo.DBRef, err error)
 }
 
+// DeviceService
+//
+// Deprecated: Mongo functionality is deprecated as of the Geneva release.
 type DeviceService struct {
 	Created        int64                   `bson:"created"`
 	Modified       int64                   `bson:"modified"`
@@ -85,6 +88,15 @@ func (ds *DeviceService) FromContract(from contract.DeviceService, transform add
 	ds.LastReported = from.LastReported
 	ds.OperatingState = from.OperatingState
 	ds.Labels = from.Labels
+
+	if from.Addressable.Id == "" {
+		byName, err := transform.GetAddressableByName(from.Addressable.Name)
+		if err != nil {
+			return "", err
+		}
+
+		from.Addressable = byName
+	}
 
 	var aModel Addressable
 	if _, err = aModel.FromContract(from.Addressable); err != nil {

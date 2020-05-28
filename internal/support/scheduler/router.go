@@ -31,9 +31,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func LoadRestRoutes(dic *di.Container) *mux.Router {
-	r := mux.NewRouter()
-
+func loadRestRoutes(r *mux.Router, dic *di.Container) {
 	// Ping Resource
 	r.HandleFunc(clients.
 		ApiPingRoute,
@@ -103,12 +101,11 @@ func LoadRestRoutes(dic *di.Container) *mux.Router {
 	interval.HandleFunc(
 		"/{"+ID+"}",
 		func(w http.ResponseWriter, r *http.Request) {
-			restDeleteIntervalByID(
-				w,
+			restDeleteIntervalByID(w,
 				r,
 				bootstrapContainer.LoggingClientFrom(dic.Get),
-				container.DBClientFrom(dic.Get),
-				schedulerContainer.QueueFrom(dic.Get))
+				schedulerContainer.QueueFrom(dic.Get),
+				container.DBClientFrom(dic.Get))
 		}).Methods(http.MethodDelete)
 	interval.HandleFunc(
 		"/"+NAME+"/{"+NAME+"}",
@@ -126,8 +123,8 @@ func LoadRestRoutes(dic *di.Container) *mux.Router {
 				w,
 				r,
 				bootstrapContainer.LoggingClientFrom(dic.Get),
-				container.DBClientFrom(dic.Get),
-				schedulerContainer.QueueFrom(dic.Get))
+				schedulerContainer.QueueFrom(dic.Get),
+				container.DBClientFrom(dic.Get))
 		}).Methods(http.MethodDelete)
 	// Scrub "Intervals and IntervalActions"
 	interval.HandleFunc(
@@ -226,6 +223,4 @@ func LoadRestRoutes(dic *di.Container) *mux.Router {
 	r.Use(correlation.ManageHeader)
 	r.Use(correlation.OnResponseComplete)
 	r.Use(correlation.OnRequestBegin)
-
-	return r
 }

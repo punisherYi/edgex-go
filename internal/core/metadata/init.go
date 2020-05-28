@@ -20,24 +20,42 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	errorContainer "github.com/edgexfoundry/edgex-go/internal/pkg/container"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/endpoint"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/errorconcept"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/urlclient"
 
 	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/bootstrap/container"
 	"github.com/edgexfoundry/go-mod-bootstrap/bootstrap/startup"
 	"github.com/edgexfoundry/go-mod-bootstrap/di"
-
 	"github.com/edgexfoundry/go-mod-core-contracts/clients"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/coredata"
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/notifications"
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/types"
+	"github.com/gorilla/mux"
 )
 
-// BootstrapHandler fulfills the BootstrapHandler contract and performs initialization needed by the metadata service.
-func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer startup.Timer, dic *di.Container) bool {
-	configuration := container.ConfigurationFrom(dic.Get)
+// Bootstrap contains references to dependencies required by the BootstrapHandler.
+type Bootstrap struct {
+	router *mux.Router
+}
 
-	// initialize clients required by service.
+// NewBootstrap is a factory method that returns an initialized Bootstrap receiver struct.
+func NewBootstrap(router *mux.Router) *Bootstrap {
+	return &Bootstrap{
+		router: router,
+	}
+}
+
+// BootstrapHandler fulfills the BootstrapHandler contract and performs initialization needed by the metadata service.
+func (b *Bootstrap) BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, _ startup.Timer, dic *di.Container) bool {
+	loadRestRoutes(b.router, dic)
+
+	// TODO: there is an outstanding known issue (https://github.com/edgexfoundry/edgex-go/issues/2462)
+	// 		that could be seemingly be solved by moving from JIT initialization of these external clients to static
+	// 		init on startup, like registryClient and configuration are initialized.
+	// 		Doing so would cover over the symptoms of the bug, but the root problem of server processing taking longer
+	// 		than the configured client time out would still be present.
+	// 		Until that problem is addressed by larger architectural changes, if you are experiencing a bug similar to
+	//		https://github.com/edgexfoundry/edgex-go/issues/2421, the correct fix is to bump up the client timeout.
+	configuration := container.ConfigurationFrom(dic.Get)
 	registryClient := bootstrapContainer.RegistryFrom(dic.Get)
 
 	// add dependencies to container
@@ -47,24 +65,29 @@ func BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer star
 		},
 		container.CoreDataValueDescriptorClientName: func(get di.Get) interface{} {
 			return coredata.NewValueDescriptorClient(
-				types.EndpointParams{
-					ServiceKey:  clients.CoreDataServiceKey,
-					Path:        clients.ApiValueDescriptorRoute,
-					UseRegistry: registryClient != nil,
-					Url:         configuration.Clients["CoreData"].Url() + clients.ApiValueDescriptorRoute,
-					Interval:    configuration.Service.ClientMonitor,
-				},
-				endpoint.Endpoint{RegistryClient: &registryClient})
+				urlclient.New(
+					ctx,
+					wg,
+					registryClient,
+					clients.CoreDataServiceKey,
+					clients.ApiValueDescriptorRoute,
+					configuration.Service.ClientMonitor,
+					configuration.Clients["CoreData"].Url()+clients.ApiValueDescriptorRoute,
+				),
+			)
 		},
 		container.NotificationsClientName: func(get di.Get) interface{} {
-			return notifications.NewNotificationsClient(types.EndpointParams{
-				ServiceKey:  clients.SupportNotificationsServiceKey,
-				Path:        clients.ApiNotificationRoute,
-				UseRegistry: registryClient != nil,
-				Url:         configuration.Clients["Notifications"].Url() + clients.ApiNotificationRoute,
-				Interval:    configuration.Service.ClientMonitor,
-			},
-				endpoint.Endpoint{RegistryClient: &registryClient})
+			return notifications.NewNotificationsClient(
+				urlclient.New(
+					ctx,
+					wg,
+					registryClient,
+					clients.SupportNotificationsServiceKey,
+					clients.ApiNotificationRoute,
+					configuration.Service.ClientMonitor,
+					configuration.Clients["Notifications"].Url()+clients.ApiNotificationRoute,
+				),
+			)
 		},
 	})
 

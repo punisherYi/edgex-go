@@ -19,6 +19,7 @@ package secretstore
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -46,7 +47,10 @@ func (w ExecWrapper) LookPath(file string) (string, error) {
 }
 
 func (w ExecWrapper) CommandContext(ctx context.Context, name string, arg ...string) CmdRunner {
-	return exec.CommandContext(ctx, name, arg...)
+	cmd := exec.CommandContext(ctx, name, arg...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
 }
 
 type TokenProvider struct {
@@ -59,9 +63,9 @@ type TokenProvider struct {
 }
 
 // NewTokenProvider creates a new TokenProvider
-func NewTokenProvider(ctx context.Context, loggingClient logger.LoggingClient, execRunner ExecRunner) *TokenProvider {
+func NewTokenProvider(ctx context.Context, lc logger.LoggingClient, execRunner ExecRunner) *TokenProvider {
 	return &TokenProvider{
-		loggingClient: loggingClient,
+		loggingClient: lc,
 		ctx:           ctx,
 		execRunner:    execRunner,
 	}

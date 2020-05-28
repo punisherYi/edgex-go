@@ -21,6 +21,9 @@ import (
 	"github.com/globalsign/mgo/bson"
 )
 
+// ProvisionWatcher
+//
+// Deprecated: Mongo functionality is deprecated as of the Geneva release.
 type ProvisionWatcher struct {
 	Created             int64                   `bson:"created"`
 	Modified            int64                   `bson:"modified"`
@@ -74,7 +77,12 @@ func (pw *ProvisionWatcher) ToContract(dpt deviceProfileTransform, dst deviceSer
 	return
 }
 
-func (pw *ProvisionWatcher) FromContract(from contract.ProvisionWatcher, dpt deviceProfileTransform, dst deviceServiceTransform, at addressableTransform) (id string, err error) {
+func (pw *ProvisionWatcher) FromContract(
+	from contract.ProvisionWatcher,
+	dpt deviceProfileTransform,
+	dst deviceServiceTransform,
+	at addressableTransform) (id string, err error) {
+
 	pw.Id, pw.Uuid, err = fromContractId(from.Id)
 	if err != nil {
 		return

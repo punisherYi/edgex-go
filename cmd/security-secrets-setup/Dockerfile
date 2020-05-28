@@ -24,8 +24,8 @@
 #  SPDX-License-Identifier: Apache-2.0'
 #  ----------------------------------------------------------------------------------
 
-# Docker image for building EdgeX Foundry Config Seed
-FROM golang:1.12-alpine AS build-env
+# Docker image for building EdgeX Foundry security-secrets-setup
+FROM golang:1.13-alpine AS build-env
 
 # environment variables
 ENV GO111MODULE=on

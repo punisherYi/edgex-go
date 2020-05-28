@@ -17,7 +17,6 @@
 package mocks
 
 import (
-	"bytes"
 	"net/http"
 	"testing"
 
@@ -43,24 +42,22 @@ func TestMockHealthCheck(t *testing.T) {
 }
 
 func TestMockInit(t *testing.T) {
-	config := SecretServiceInfo{}
-	scratchBuffer := new(bytes.Buffer)
+	var initResp InitResponse
 	mockClient := &MockSecretStoreClient{}
-	mockClient.On("Init", config, scratchBuffer).Return(http.StatusOK, nil)
+	mockClient.On("Init", 1, 2, &initResp).Return(http.StatusOK, nil)
 
-	rc, err := mockClient.Init(config, scratchBuffer)
+	rc, err := mockClient.Init(1, 2, &initResp)
 	assert.Nil(t, err)
 	assert.Equal(t, http.StatusOK, rc)
 	mockClient.AssertExpectations(t)
 }
 
 func TestMockUnseal(t *testing.T) {
-	config := SecretServiceInfo{}
-	scratchBuffer := new(bytes.Buffer)
+	var initResponse InitResponse
 	mockClient := &MockSecretStoreClient{}
-	mockClient.On("Unseal", config, scratchBuffer).Return(http.StatusOK, nil)
+	mockClient.On("Unseal", &initResponse).Return(http.StatusOK, nil)
 
-	rc, err := mockClient.Unseal(config, scratchBuffer)
+	rc, err := mockClient.Unseal(&initResponse)
 	assert.Nil(t, err)
 	assert.Equal(t, http.StatusOK, rc)
 	mockClient.AssertExpectations(t)
@@ -143,10 +140,31 @@ func TestMockRevokeSelf(t *testing.T) {
 
 func TestMockRegenRootToken(t *testing.T) {
 	mockClient := &MockSecretStoreClient{}
-	mockClient.On("RegenRootToken", mock.Anything, mock.Anything).Return(nil)
+	var initResponse InitResponse
+	mockClient.On("RegenRootToken", &initResponse, mock.Anything).Return(nil)
 
 	var rootToken string
-	err := mockClient.RegenRootToken(nil, &rootToken)
+	err := mockClient.RegenRootToken(&initResponse, &rootToken)
 	assert.NoError(t, err)
+	mockClient.AssertExpectations(t)
+}
+
+func TestMockCheckSecretEngineInstalled(t *testing.T) {
+	mockClient := &MockSecretStoreClient{}
+	mockClient.On("CheckSecretEngineInstalled", "fake-token", "secrets/", "kv").Return(true, nil)
+
+	installed, err := mockClient.CheckSecretEngineInstalled("fake-token", "secrets/", "kv")
+	assert.NoError(t, err)
+	assert.True(t, installed)
+	mockClient.AssertExpectations(t)
+}
+
+func TestMockEnableKVSecretEngine(t *testing.T) {
+	mockClient := &MockSecretStoreClient{}
+	mockClient.On("EnableKVSecretEngine", "fake-token", "secrets/", "1").Return(http.StatusOK, nil)
+
+	rc, err := mockClient.EnableKVSecretEngine("fake-token", "secrets/", "1")
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rc)
 	mockClient.AssertExpectations(t)
 }

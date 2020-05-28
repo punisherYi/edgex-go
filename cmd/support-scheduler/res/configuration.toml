@@ -18,9 +18,10 @@ Host = 'localhost'
 Port = 8500
 Type = 'consul'
 
+# Remote and file logging disabled so only stdout logging is used
 [Logging]
 EnableRemote = false
-File = './logs/edgex-support-scheduler.log'
+File = ''
 
 [Clients]
   [Clients.Logging]
@@ -32,11 +33,11 @@ File = './logs/edgex-support-scheduler.log'
   [Databases.Primary]
   Host = 'localhost'
   Name = 'scheduler'
-  Password = ''
-  Port = 27017
-  Username = ''
+  Password = 'password'
+  Username = 'scheduler'
+  Port = 6379
   Timeout = 5000
-  Type = 'mongodb'
+  Type = 'redisdb'
 
 [Intervals]
     [Intervals.Midnight]
@@ -79,7 +80,6 @@ AdditionalRetryAttempts = 10
 RetryWaitPeriod = "1s"
   [SecretStore.Authentication]
   AuthType = 'X-Vault-Token'
-  AuthToken = 'edgex'
 
 [Startup]
 Duration = 30

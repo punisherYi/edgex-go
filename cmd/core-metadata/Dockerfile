@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-FROM golang:1.12-alpine AS builder
+FROM golang:1.13-alpine AS builder
 
 ENV GO111MODULE=on
 WORKDIR /go/src/github.com/edgexfoundry/edgex-go
@@ -26,17 +26,18 @@ RUN go mod download
 COPY . .
 RUN make cmd/core-metadata/core-metadata
 
+#Next image - Copy built Go binary into new workspace
 FROM scratch
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
       copyright='Copyright (c) 2018: Dell, Cavium'
 
-ENV APP_PORT=48082
+ENV APP_PORT=48081
 #expose meta data port
 EXPOSE $APP_PORT
 
 WORKDIR /
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-metadata/Attribution.txt /
 COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-metadata/core-metadata /
-COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-metadata/res/docker/configuration.toml /res/docker/configuration.toml
-ENTRYPOINT ["/core-metadata","--registry","--profile=docker","--confdir=/res"]
+COPY --from=builder /go/src/github.com/edgexfoundry/edgex-go/cmd/core-metadata/res/configuration.toml /res/configuration.toml
+ENTRYPOINT ["/core-metadata","-cp=consul.http://edgex-core-consul:8500","--registry","--confdir=/res"]

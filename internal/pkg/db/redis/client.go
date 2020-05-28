@@ -16,6 +16,7 @@ package redis
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -59,12 +60,14 @@ func NewCoreDataClient(config db.Configuration, logger logger.LoggingClient) (*C
 }
 
 // Return a pointer to the Redis client
-func NewClient(config db.Configuration, loggingClient logger.LoggingClient) (*Client, error) {
+func NewClient(config db.Configuration, lc logger.LoggingClient) (*Client, error) {
 	once.Do(func() {
 		connectionString := fmt.Sprintf("%s:%d", config.Host, config.Port)
 		opts := []redis.DialOption{
-			redis.DialPassword(config.Password),
 			redis.DialConnectTimeout(time.Duration(config.Timeout) * time.Millisecond),
+		}
+		if os.Getenv("EDGEX_SECURITY_SECRET_STORE") != "false" {
+			opts = append(opts, redis.DialPassword(config.Password))
 		}
 
 		dialFunc := func() (redis.Conn, error) {
@@ -95,9 +98,15 @@ func NewClient(config db.Configuration, loggingClient logger.LoggingClient) (*Cl
 				Dial:    dialFunc,
 			},
 			BatchSize:     batchSize,
-			loggingClient: loggingClient,
+			loggingClient: lc,
 		}
 	})
+
+	// Test connectivity now so don't have failures later when doing lazy connect.
+	if _, err := currClient.Pool.Dial(); err != nil {
+		return nil, err
+	}
+
 	return currClient, nil
 }
 
@@ -108,9 +117,7 @@ func (c *Client) Connect() error {
 
 // CloseSession closes the connections to Redis
 func (c *Client) CloseSession() {
-	c.Pool.Close()
-	close(deleteEventsChannel)
-	close(deleteReadingsChannel)
+	_ = c.Pool.Close()
 	currClient = nil
 	once = sync.Once{}
 }

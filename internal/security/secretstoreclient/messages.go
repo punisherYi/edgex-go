@@ -27,7 +27,7 @@ type InitRequest struct {
 type InitResponse struct {
 	Keys       []string `json:"keys"`
 	KeysBase64 []string `json:"keys_base64"`
-	RootToken  string   `json:"root_token"`
+	RootToken  string   `json:"root_token,omitempty"`
 }
 
 // UnsealRequest contains a Vault unseal request
@@ -96,4 +96,20 @@ type RootTokenRetrievalRequest struct {
 type RootTokenRetrievalResponse struct {
 	Complete     bool   `json:"complete"`
 	EncodedToken string `json:"encoded_token"`
+}
+
+// ListSecretEnginesResponse is the response to GET /v1/sys/mounts
+type ListSecretEnginesResponse struct {
+	Data map[string]struct {
+		Type string `json:"type"`
+	} `json:"data"`
+}
+
+// EnableSecretsEngineRequest is the POST request to /v1/sys/mounts
+type EnableSecretsEngineRequest struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Options     struct {
+		Version string `json:"version"`
+	} `json:"options"`
 }
